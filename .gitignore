@@ -1,0 +1,3 @@
+# Données volumineuses : jar, dumps, index, logs, staging
+data/
+*.log
