@@ -1,54 +1,55 @@
 # photon-geocoder
 
-Géocodeur **Photon 1.2.0** (OpenSearch embarqué) construit en local depuis les **dumps JSON**
-officiels GraphHopper. Périmètre : **Europe + Brésil + Argentine**, dans **une seule base**.
+Déploiement **mono-VM** d'un géocodeur **Photon 1.2.0** (OpenSearch embarqué), index
+**Europe + Brésil + Argentine** construit à partir des **dumps JSON** GraphHopper.
 
-> ⚠️ **Échelle.** Europe complète + BR + AR ≈ **40-60 M documents**. L'import (indexation +
-> merges OpenSearch) **exige beaucoup de RAM**. Testé : **24 Go = insuffisant** (swap puis
-> crawl à ~500 docs/s, voir [HANDOVER.md](HANDOVER.md)). Cible recommandée : **VM 48-64 Go**.
-> Pour le déroulé sur VM (accès Delinea), voir **[RUNBOOK-VM.md](RUNBOOK-VM.md)**.
+**Un seul fichier** : [`deploy.sh`](deploy.sh).
 
-## Scripts
+## Usage (sur la VM, via Delinea)
 
-| Script | Rôle |
-|--------|------|
-| `prereqs.sh`    | Vérifie RAM/disque/Java 21/zstd/jq et dit quoi installer |
-| `download.sh`   | Télécharge le jar + les 3 dumps (~13.5 Go, reprise auto, proxy via `HTTPS_PROXY`) |
-| `import.sh`     | Intégrité `zstd -t` → import (concat naïve) → bascule atomique |
-| `serve.sh`      | Démarre le serveur (`127.0.0.1:2322` par défaut) |
-| `smoke-test.sh` | Requête les 7 villes test (FR/DE/IT/ES/PT/BR/AR) + un reverse |
-
-Tous portables Linux/macOS (détection Java 21, RAM, nproc). Réglages par variables d'env :
-`PHOTON_XMX` (heap, défaut ≈40 % RAM plafonné 24g), `PHOTON_THREADS` (défaut 2),
-`PHOTON_LANGS` (défaut `en,fr,es,pt,de,it`), `PHOTON_JAVA` (chemin java 21).
-
-## Démarrage rapide
+La session Delinea peut couper → tout dans **tmux** (l'import dure 1-3 h et **ne reprend pas**) :
 
 ```bash
-./prereqs.sh                 # 1. contrôle env (installe java21/zstd/jq si besoin)
-./download.sh                # 2. jar + 3 dumps  (ou transférer les dumps, cf RUNBOOK)
-./import.sh                  # 3. import (LANCER DANS tmux sur une VM : peut durer 1-3 h)
-./serve.sh                   # 4. serveur
-./smoke-test.sh              # 5. validation des 3 régions
+tmux new -s photon
+./deploy.sh all        # deps (java21/zstd/jq) + fetch (~13.5 Go) + import (1-3 h)
+./deploy.sh serve      # serveur sur http://127.0.0.1:2322   (Ctrl-b d pour détacher tmux)
+./deploy.sh test       # valide Paris/Berlin/Roma/Madrid/Lisboa/São Paulo/Buenos Aires
 ```
+
+Sous-commandes : `deps | fetch | import | serve | test | status` (cf. en-tête de `deploy.sh`).
+
+Réglages par variables d'env : `PHOTON_XMX` (heap, défaut ≈40 % RAM plafonné 24g),
+`PHOTON_THREADS` (2), `PHOTON_LANGS` (`en,fr,es,pt,de,it`), `PHOTON_JAVA`,
+`PHOTON_LISTEN_IP/PORT`, `HTTPS_PROXY` (proxy d'entreprise), `PHOTON_FORCE=1`.
+
+## Pré-requis VM
+
+Linux (apt/dnf) + sudo · **64 Go RAM** · ~80 Go disque libre · SSD/NVMe · accès internet
+(ou proxy ; sinon copier les dumps dans `data/dumps/` à la main).
+
+## Pourquoi 64 Go (et pas 24)
+
+Europe+BR+AR ≈ 40-60 M docs. Testé sur 24 Go : **échec systématique vers 3,3 M docs** —
+soit crash `SocketTimeoutException` (heap trop gros → **swap** → les merges OpenSearch
+dépassent les 30 s), soit, sans swap, **effondrement du débit à ~500 docs/s** (pas assez de
+page cache pour les merges) → ~15 h projetées. Le README officiel Photon recommande **64 Go**
+et « ne jamais swapper ». La RAM est le seul vrai levier ; ni le heap ni les threads ne
+déplacent ce mur. `deploy.sh` refuse de démarrer sous 40 Go (sauf `PHOTON_FORCE=1`).
+
+## Méthode d'import (officielle)
+
+Concaténer les dumps JSON et les piper dans `import` ; l'importeur ignore les en-têtes en
+double (`WARN` inoffensif). Source : [nominatim.org, 13/08/2025](https://nominatim.org/2025/08/13/photon-exports-renewed.html).
+Pas de Nominatim, pas de fusion d'index. `deploy.sh` ajoute intégrité (`zstd -t`) + bascule
+atomique (l'`import` **écrase** la base existante et **n'est pas reprenable**).
+
+Dumps utilisés (format `-1.0-`, lu par le jar 1.2.0) :
+`europe`, `south-america/brazil`, `south-america/argentina` sous
+`https://download1.graphhopper.com/public/`.
 
 ## Endpoint
 
-`http://127.0.0.1:2322`
+`http://127.0.0.1:2322` — `/api?q=Buenos+Aires&limit=3` · `/reverse?lat=-34.6&lon=-58.4` · `/status`.
+Depuis ton poste : tunnel `ssh -L 2322:127.0.0.1:2322 …` via le bastion Delinea.
 
-| Usage | Exemple |
-|-------|---------|
-| Recherche | `/api?q=Buenos+Aires&limit=3` |
-| Reverse   | `/reverse?lat=-34.6037&lon=-58.3816` |
-| Statut    | `/status` |
-
-## Méthode d'import (officielle, 2025+)
-
-Concaténer les dumps JSON et les piper dans `import` ; l'importeur ignore les en-têtes en
-double. Source : [nominatim.org, 13/08/2025](https://nominatim.org/2025/08/13/photon-exports-renewed.html).
-Pas de Nominatim, pas de fusion d'index. `import.sh` ajoute intégrité + bascule atomique
-(car relancer `import` **écrase** la base, et l'import **n'est pas reprenable**).
-
-## Données (gitignored, dans `data/`)
-
-`data/photon-1.2.0.jar` · `data/dumps/*.jsonl.zst` · `data/photon_data/` (index) · `data/*.log`
+`data/` (jar, dumps, index) est gitignored.
