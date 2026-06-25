@@ -1,3 +1,6 @@
 # Données volumineuses : jar, dumps, index, logs, staging
 data/
 *.log
+
+# macOS
+.DS_Store
