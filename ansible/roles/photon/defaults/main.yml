@@ -1,0 +1,25 @@
+---
+photon_app_dir: /opt/photon
+photon_user: photon
+photon_java: /usr/bin/java
+
+photon_version: "1.2.0"
+photon_jar: "{{ photon_app_dir }}/photon-{{ photon_version }}.jar"
+photon_jar_url: "https://github.com/komoot/photon/releases/download/{{ photon_version }}/photon-{{ photon_version }}.jar"
+photon_dump_base: "https://download1.graphhopper.com/public"
+photon_dump_urls:
+  - "{{ photon_dump_base }}/europe/photon-dump-europe-1.0-latest.jsonl.zst"
+  - "{{ photon_dump_base }}/south-america/brazil/photon-dump-brazil-1.0-latest.jsonl.zst"
+  - "{{ photon_dump_base }}/south-america/argentina/photon-dump-argentina-1.0-latest.jsonl.zst"
+
+photon_import_heap: "24g"   # au-delà de ~RAM/2 la VM swappe pendant les merges
+photon_import_threads: 2
+photon_languages: "en,fr,es,pt,de,it"
+
+photon_server_heap: "4g"
+photon_listen_ip: "127.0.0.1"
+photon_listen_port: 2322
+
+photon_proxy: ""
+photon_min_ram_gb: 48
+photon_force: false

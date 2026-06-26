@@ -1,0 +1,15 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Construction de l'index Photon (Europe + BR + AR)
+After=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User={{ photon_user }}
+Group={{ photon_user }}
+ExecStart={{ photon_app_dir }}/photon-build-index.sh
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

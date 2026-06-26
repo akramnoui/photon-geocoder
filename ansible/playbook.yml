@@ -1,0 +1,6 @@
+---
+- name: Déploiement Photon geocoder (Europe + Brésil + Argentine)
+  hosts: photon
+  gather_facts: true
+  roles:
+    - photon

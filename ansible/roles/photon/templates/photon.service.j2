@@ -1,0 +1,16 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Serveur de géocodage Photon
+After=network-online.target
+ConditionPathExists={{ photon_app_dir }}/data/photon_data
+
+[Service]
+Type=simple
+User={{ photon_user }}
+Group={{ photon_user }}
+ExecStart={{ photon_java }} --enable-native-access=ALL-UNNAMED -Xmx{{ photon_server_heap }} -jar {{ photon_jar }} serve -data-dir {{ photon_app_dir }}/data -listen-ip {{ photon_listen_ip }} -listen-port {{ photon_listen_port }}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

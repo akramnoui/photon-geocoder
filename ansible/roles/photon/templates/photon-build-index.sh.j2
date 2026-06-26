@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+set -euo pipefail
+
+data_dir="{{ photon_app_dir }}/data"
+dumps_dir="$data_dir/dumps"
+staging_dir="$data_dir/staging"
+
+shopt -s nullglob
+dumps=("$dumps_dir"/*.jsonl.zst)
+(( ${#dumps[@]} )) || { echo "Aucun dump dans $dumps_dir" >&2; exit 1; }
+
+for dump in "${dumps[@]}"; do
+  zstd --test "$dump"
+done
+
+rm -rf "$staging_dir"
+mkdir -p "$staging_dir"
+zstd --stdout --decompress "${dumps[@]}" \
+  | {{ photon_java }} --enable-native-access=ALL-UNNAMED -Xmx{{ photon_import_heap }} \
+      -jar "{{ photon_jar }}" import -import-file - \
+      -data-dir "$staging_dir" -languages "{{ photon_languages }}" -j {{ photon_import_threads }}
+
+rm -rf "$data_dir/photon_data"
+mv "$staging_dir/photon_data" "$data_dir/photon_data"
+rmdir "$staging_dir" 2>/dev/null || true
