@@ -15,7 +15,8 @@ Reference: [github.com/komoot/photon](https://github.com/komoot/photon).
 
 Concatenate the address fields you have (house number, street, postcode, city) into a
 single `q` string, URL-encoded, and always pass the country as an ISO 3166-1 alpha-2
-code. The `countrycode` filter is what keeps a Porto address from matching in Brazil.
+code. The `countrycode` filter is what keeps a Porto address from matching in Brazil
+(it can be repeated to allow several countries).
 
 ```
 GET /api?q={housenumber} {street}, {postcode} {city}&countrycode={CC}&limit=1
@@ -24,6 +25,10 @@ GET /api?q={housenumber} {street}, {postcode} {city}&countrycode={CC}&limit=1
 ```bash
 curl 'http://10.137.64.165/api?q=170+Avenida+da+Boavista,+4050-115+Porto&countrycode=PT&limit=1'
 ```
+
+> Migration note: the retired HTTPS deployment ran an older Photon build whose `/api`
+> rejected `countrycode` with `400 Unknown query parameter`. If you get that error,
+> you are still hitting the old stack; switch to `http://` and this base URL.
 
 ## 2. Structured query (fallback)
 
