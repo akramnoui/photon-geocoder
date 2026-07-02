@@ -36,8 +36,10 @@ one node at a time, so the cluster keeps serving during a redeploy.
 
 Linux VMs (Debian/Ubuntu or RHEL), `sudo`, **64 GB RAM on the leader** (the import
 fails below that, see Sizing), ~80 GB free disk, SSD/NVMe. Only the leader reaches the
-internet (through the pickup proxy, see `group_vars/all.yml`). Ansible ≥ 2.14 and the
-`ansible.posix` collection on the machine running the play (VM1).
+internet (through the pickup proxy, see `group_vars/all.yml`). On the machine running
+the play (VM1): Ansible ≥ 2.14 and the `ansible.posix` collection — with ansible-core
+2.14 (RHEL-packaged), pin it: `ansible-galaxy collection install 'ansible.posix:1.5.4'`
+(the 2.x line of the collection requires a newer core).
 
 ## Deployment
 
