@@ -1,0 +1,4 @@
+---
+lb_listen_port: 80
+lb_photon_port: 2322
+lb_keepalive: 32

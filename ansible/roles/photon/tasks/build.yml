@@ -1,0 +1,113 @@
+---
+- name: Create the dumps directory
+  become: true
+  ansible.builtin.file:
+    path: "{{ photon_app_dir }}/data/dumps"
+    state: directory
+    owner: "{{ photon_user }}"
+    group: "{{ photon_user }}"
+    mode: "0755"
+
+# force: a requested rebuild (photon_force) also refreshes the "latest"
+# dumps, otherwise we would re-import the same data.
+- name: Download the JSON dumps
+  become: true
+  ansible.builtin.get_url:
+    url: "{{ item }}"
+    dest: "{{ photon_app_dir }}/data/dumps/{{ item | basename }}"
+    force: "{{ photon_force | bool }}"
+    owner: "{{ photon_user }}"
+    group: "{{ photon_user }}"
+    mode: "0644"
+    timeout: 60
+  loop: "{{ photon_dump_urls }}"
+  register: photon_dumps_dl
+  until: photon_dumps_dl is succeeded
+  retries: 3
+  delay: 30
+  environment:
+    https_proxy: "{{ photon_proxy }}"
+    http_proxy: "{{ photon_proxy }}"
+
+- name: Deploy the index build script
+  become: true
+  ansible.builtin.template:
+    src: photon-build-index.sh.j2
+    dest: "{{ photon_app_dir }}/photon-build-index.sh"
+    owner: "{{ photon_user }}"
+    group: "{{ photon_user }}"
+    mode: "0755"
+
+- name: Deploy the photon-index-build.service unit
+  become: true
+  ansible.builtin.template:
+    src: photon-index-build.service.j2
+    dest: /etc/systemd/system/photon-index-build.service
+    mode: "0644"
+  register: photon_build_unit
+
+- name: Reload systemd after a unit change
+  become: true
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: photon_build_unit is changed
+
+- name: Check for an existing index
+  become: true
+  ansible.builtin.stat:
+    path: "{{ photon_app_dir }}/data/photon_data"
+  register: photon_index
+
+- name: Check the build service state
+  become: true
+  ansible.builtin.command: systemctl is-active photon-index-build.service
+  register: photon_build_active
+  changed_when: false
+  failed_when: false
+
+- name: Decide whether to build
+  ansible.builtin.set_fact:
+    photon_build_needed: "{{ photon_force | bool or not photon_index.stat.exists }}"
+    photon_build_running: "{{ photon_build_active.stdout == 'activating' }}"
+
+# stop then start: `start` alone is a no-op when the oneshot unit
+# (RemainAfterExit) stayed active from a previous build, and `restart
+# --no-block` lets the wait below read the previous build's state.
+# A build already in progress is not restarted: we wait for it.
+- name: Start the index build (detached service)
+  become: true
+  ansible.builtin.shell: >-
+    systemctl stop photon-index-build.service &&
+    systemctl start --no-block photon-index-build.service
+  changed_when: true
+  when: photon_build_needed and not photon_build_running
+  notify: Restart photon
+
+- name: Wait for the build to finish (~1-3 h)
+  become: true
+  ansible.builtin.command: systemctl is-active photon-index-build.service
+  register: photon_build_state
+  until: photon_build_state.stdout in ['active', 'failed']
+  retries: 120
+  delay: 120
+  changed_when: false
+  failed_when: photon_build_state.stdout != 'active'
+  when: photon_build_needed or photon_build_running
+
+# An index built before the marker was introduced gets one here; the
+# build script writes it itself for subsequent builds.
+- name: Check for the build marker
+  become: true
+  ansible.builtin.stat:
+    path: "{{ photon_app_dir }}/data/photon_data/.build-id"
+  register: photon_build_marker
+
+- name: Write the build marker if missing
+  become: true
+  ansible.builtin.copy:
+    dest: "{{ photon_app_dir }}/data/photon_data/.build-id"
+    content: "{{ ansible_date_time.iso8601 }}\n"
+    owner: "{{ photon_user }}"
+    group: "{{ photon_user }}"
+    mode: "0644"
+  when: not photon_build_marker.stat.exists

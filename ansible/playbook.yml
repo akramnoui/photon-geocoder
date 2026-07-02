@@ -1,6 +1,15 @@
 ---
-- name: Déploiement Photon geocoder (Europe + Brésil + Argentine)
+# serial: 1 rolls one node at a time (leader first), so the cluster stays
+# served behind the LB during a redeploy.
+- name: Deploy the Photon cluster
   hosts: photon
+  serial: 1
   gather_facts: true
   roles:
     - photon
+
+- name: Deploy the Nginx load balancer
+  hosts: lb
+  gather_facts: true
+  roles:
+    - lb

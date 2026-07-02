@@ -8,7 +8,7 @@ staging_dir="$data_dir/staging"
 
 shopt -s nullglob
 dumps=("$dumps_dir"/*.jsonl.zst)
-(( ${#dumps[@]} )) || { echo "Aucun dump dans $dumps_dir" >&2; exit 1; }
+(( ${#dumps[@]} )) || { echo "No dump in $dumps_dir" >&2; exit 1; }
 
 for dump in "${dumps[@]}"; do
   zstd --test "$dump"
@@ -20,6 +20,9 @@ zstd --stdout --decompress "${dumps[@]}" \
   | {{ photon_java }} --enable-native-access=ALL-UNNAMED -Xmx{{ photon_import_heap }} \
       -jar "{{ photon_jar }}" import -import-file - \
       -data-dir "$staging_dir" -languages "{{ photon_languages }}" -j {{ photon_import_threads }}
+
+# Build marker: followers use it to detect a new index.
+date -u +%FT%TZ > "$staging_dir/photon_data/.build-id"
 
 rm -rf "$data_dir/photon_data"
 mv "$staging_dir/photon_data" "$data_dir/photon_data"

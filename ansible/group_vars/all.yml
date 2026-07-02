@@ -1,0 +1,8 @@
+---
+# pickup-environment specifics. Every node goes through the proxy for the
+# jar; the dumps are only downloaded on the leader.
+photon_proxy: "http://proxy-prod.paris.pickup.local:3128"
+
+# -e cleanup_legacy=true: purge leftovers from the old playbooks
+# (/data/photon, old symlink, GC logs, the LB's self-signed certificate).
+cleanup_legacy: false

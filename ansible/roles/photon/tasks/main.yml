@@ -1,42 +1,33 @@
 ---
-- name: Garde-fou RAM
-  ansible.builtin.assert:
-    that:
-      - ansible_memtotal_mb >= (photon_min_ram_gb | int) * 1024 or photon_force
-    fail_msg: >-
-      RAM {{ (ansible_memtotal_mb / 1024) | round }} Go < {{ photon_min_ram_gb }} Go :
-      l'import Europe va swapper. Vise 64 Go, ou -e photon_force=true.
-    quiet: true
-
-- name: Installer les paquets (Debian/Ubuntu)
+- name: Install packages (Debian/Ubuntu)
   become: true
   ansible.builtin.apt:
-    name: [openjdk-21-jre-headless, zstd, curl]
+    name: [openjdk-21-jre-headless, zstd, curl, rsync]
     state: present
     update_cache: true
     cache_valid_time: 3600
   when: ansible_os_family == "Debian"
 
-- name: Installer les paquets
+- name: Install packages
   become: true
   ansible.builtin.dnf:
-    name: [java-21-openjdk-headless, zstd, curl]
+    name: [java-21-openjdk-headless, zstd, curl, rsync]
     state: present
   when: ansible_os_family == "RedHat"
 
-- name: Contrôler la version de Java
+- name: Check the Java version
   ansible.builtin.command: "{{ photon_java }} -version"
   changed_when: false
   register: photon_java_version
 
-- name: Exiger Java 21
+- name: Require Java 21
   ansible.builtin.assert:
     that:
       - photon_java_version.stderr is search('version .21')
-    fail_msg: "Java 21 requis ; {{ photon_java }} -> {{ photon_java_version.stderr_lines | first | default('?') }}"
+    fail_msg: "Java 21 required; {{ photon_java }} -> {{ photon_java_version.stderr_lines | first | default('?') }}"
     quiet: true
 
-- name: Créer l'utilisateur de service
+- name: Create the service user
   become: true
   ansible.builtin.user:
     name: "{{ photon_user }}"
@@ -46,7 +37,7 @@
     shell: /usr/sbin/nologin
   when: photon_user != "root"
 
-- name: Créer l'arborescence
+- name: Create the directory tree
   become: true
   ansible.builtin.file:
     path: "{{ item }}"
@@ -56,9 +47,9 @@
     mode: "0755"
   loop:
     - "{{ photon_app_dir }}"
-    - "{{ photon_app_dir }}/data/dumps"
+    - "{{ photon_app_dir }}/data"
 
-- name: Télécharger le jar Photon
+- name: Download the Photon jar
   become: true
   ansible.builtin.get_url:
     url: "{{ photon_jar_url }}"
@@ -68,63 +59,47 @@
     group: "{{ photon_user }}"
     mode: "0644"
     timeout: 60
+  register: photon_jar_dl
+  until: photon_jar_dl is succeeded
+  retries: 3
+  delay: 10
   environment:
     https_proxy: "{{ photon_proxy }}"
     http_proxy: "{{ photon_proxy }}"
 
-- name: Télécharger les dumps JSON
-  become: true
-  ansible.builtin.get_url:
-    url: "{{ item }}"
-    dest: "{{ photon_app_dir }}/data/dumps/{{ item | basename }}"
-    owner: "{{ photon_user }}"
-    group: "{{ photon_user }}"
-    mode: "0644"
-    timeout: 60
-  loop: "{{ photon_dump_urls }}"
-  environment:
-    https_proxy: "{{ photon_proxy }}"
-    http_proxy: "{{ photon_proxy }}"
-
-- name: Déployer le script de construction d'index
+- name: Deploy the photon.service unit
   become: true
   ansible.builtin.template:
-    src: photon-build-index.sh.j2
-    dest: "{{ photon_app_dir }}/photon-build-index.sh"
-    owner: "{{ photon_user }}"
-    group: "{{ photon_user }}"
-    mode: "0755"
-
-- name: Déployer les units systemd
-  become: true
-  ansible.builtin.template:
-    src: "{{ item }}.j2"
-    dest: "/etc/systemd/system/{{ item }}"
+    src: photon.service.j2
+    dest: /etc/systemd/system/photon.service
     mode: "0644"
-  loop:
-    - photon-index-build.service
-    - photon.service
-  notify: Recharger systemd
+  notify:
+    - Reload systemd
+    - Restart photon
 
-- name: Appliquer les changements systemd
+- name: Build the index (leader)
+  ansible.builtin.import_tasks: build.yml
+  when: photon_is_leader | bool
+
+- name: Receive the index from the leader (followers)
+  ansible.builtin.import_tasks: sync.yml
+  when: not photon_is_leader | bool
+
+- name: Apply pending systemd changes
   ansible.builtin.meta: flush_handlers
 
-- name: État de l'index
+- name: Enable and start photon
   become: true
-  ansible.builtin.stat:
-    path: "{{ photon_app_dir }}/data/photon_data"
-  register: photon_index
+  ansible.builtin.systemd:
+    name: photon
+    enabled: true
+    state: started
 
-- name: Construire l'index en arrière-plan
-  become: true
-  ansible.builtin.command: systemctl start --no-block photon-index-build.service
-  changed_when: true
-  when: not photon_index.stat.exists or photon_force
+- name: Wait for photon to answer on its port
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: "{{ photon_listen_port }}"
+    timeout: 300
 
-- name: Suite des opérations
-  ansible.builtin.debug:
-    msg:
-      - "Index en construction (service photon-index-build, ~1-3 h)."
-      - "Suivi  : journalctl -u photon-index-build -f"
-      - "Servir : sudo systemctl enable --now photon"
-      - "Tester : curl 'http://{{ photon_listen_ip }}:{{ photon_listen_port }}/api?q=Paris&limit=1'"
+- name: Handle leftovers from the old playbooks
+  ansible.builtin.import_tasks: cleanup.yml

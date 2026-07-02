@@ -1,5 +1,11 @@
 ---
-- name: Recharger systemd
+- name: Reload systemd
   become: true
   ansible.builtin.systemd:
     daemon_reload: true
+
+- name: Restart photon
+  become: true
+  ansible.builtin.systemd:
+    name: photon
+    state: restarted

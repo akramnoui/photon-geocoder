@@ -1,0 +1,29 @@
+# {{ ansible_managed }}
+upstream photon {
+{% for host in groups['photon'] %}
+    server {{ hostvars[host].ansible_host | default(host) }}:{{ lb_photon_port }} max_fails=2 fail_timeout=10s;
+{% endfor %}
+    keepalive {{ lb_keepalive }};
+}
+
+server {
+    listen {{ lb_listen_port }} default_server;
+    server_name _;
+
+    location = /nginx_status {
+        stub_status;
+        allow 127.0.0.1;
+        deny all;
+        access_log off;
+    }
+
+    location / {
+        proxy_pass http://photon;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 90;
+        proxy_connect_timeout 90;
+    }
+}

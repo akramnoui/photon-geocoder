@@ -1,92 +1,146 @@
-# Photon geocoder — Dossier d'exploitation
+# Photon geocoder — Operations guide
 
-Géocodeur **Photon 1.2.0** (Europe + Brésil + Argentine), déployé par **Ansible** sur une VM,
-index construit en local depuis les dumps JSON GraphHopper.
+**Photon 1.2.0** geocoder (Europe + Brazil + Argentina), deployed with **Ansible** on a
+3-VM cluster behind an Nginx load balancer. The index is built on the **leader** from
+the GraphHopper JSON dumps, then distributed to the other nodes over rsync.
 
 ## Architecture
 
 ```
-Ansible (rôle photon)            VM
-  ├─ paquets (Java 21, zstd)     /opt/photon/
-  ├─ utilisateur de service        ├─ photon-1.2.0.jar
-  ├─ jar + dumps (get_url)         ├─ photon-build-index.sh   (généré)
-  └─ units systemd                 └─ data/{dumps,photon_data}
-        ├─ photon-index-build.service  (oneshot)  intégrité → import → bascule
-        └─ photon.service              (serveur)  API :2322
+                        Nginx (:80, SRVLH-GEO-A1)
+                          upstream photon :2322
+               ┌─────────────────┼─────────────────┐
+        SRVLH-GEO-A1       SRVLH-GEO-A2       SRVLH-GEO-A3
+          (leader)           (follower)         (follower)
+        builds the index  ◄── rsync photon_data ──►
+        from the dumps
 ```
 
-L'unique reliquat de bash est `photon-build-index.sh` (~20 lignes, généré par le rôle) :
-contrôle d'intégrité, concaténation des dumps dans `import`, bascule atomique de l'index.
+Ansible roles:
 
-## Pré-requis
+- **photon** (every node): Java 21, service user, jar, `photon.service` unit.
+  - *Leader* (first host of the `photon` group): downloads the dumps, builds the index
+    through `photon-index-build.service` (detached oneshot: integrity check → import →
+    atomic swap), writes a `.build-id` marker inside the index.
+  - *Followers*: compare their `.build-id` with the leader's; if it differs or is
+    missing, the index is pushed over rsync (dedicated key generated on the leader)
+    and swapped in.
+- **lb**: plain-HTTP Nginx on :80, upstream generated from the inventory's `photon`
+  group (adding a node = edit the inventory + re-run).
 
-VM Linux (Debian/Ubuntu ou RHEL), `sudo`, **64 Go RAM**, ~80 Go disque libre, SSD/NVMe,
-accès internet (ou proxy, ou dumps pré-stagés). Ansible ≥ 2.14 sur le poste qui lance le play.
+The playbook describes the target state and converges idempotently: an up-to-date node
+is left alone, a stale node is resynced, a fresh node is installed. `serial: 1` rolls
+one node at a time, so the cluster keeps serving during a redeploy.
 
-## Déploiement
+## Prerequisites
 
-Depuis la VM (accès Delinea), dans `tmux` — le téléchargement (~13.5 Go) se fait pendant le play :
+Linux VMs (Debian/Ubuntu or RHEL), `sudo`, **64 GB RAM on the leader** (the import
+fails below that, see Sizing), ~80 GB free disk, SSD/NVMe. Only the leader reaches the
+internet (through the pickup proxy, see `group_vars/all.yml`). Ansible ≥ 2.14 and the
+`ansible.posix` collection on the machine running the play (VM1).
+
+## Deployment
+
+From **VM1** (SRVLH-GEO-A1, Delinea access), inside `tmux` — the first index build
+(~1-3 h) happens during the play:
 
 ```bash
-git clone git@github.com:akramnoui/photon-geocoder.git && cd photon-geocoder/ansible
+git clone https://github.com/akramnoui/photon-geocoder.git && cd photon-geocoder/ansible
 tmux new -s photon
 ansible-playbook playbook.yml --ask-become-pass
 ```
 
-Le play installe, télécharge, puis lance la construction de l'index en **service détaché**
-(qui survit à la coupure de session). Ensuite :
+The play: leader (index build if missing, wait for completion) → followers one at a
+time (index rsync if stale) → servers started and checked on :2322 → Nginx LB.
 
 ```bash
-journalctl -u photon-index-build -f          # suivre la construction (~1-3 h)
-sudo systemctl enable --now photon           # démarrer le serveur une fois l'index prêt
-curl 'http://127.0.0.1:2322/api?q=Paris&limit=1'
+curl 'http://SRVLH-GEO-A1/api?q=Paris&limit=1'        # through the LB
+curl 'http://127.0.0.1:2322/api?q=Paris&limit=1'      # a node directly
 ```
 
-## Paramètres — `ansible/roles/photon/defaults/main.yml`
+## Parameters — `ansible/roles/photon/defaults/main.yml`
 
-| Variable | Défaut | Rôle |
+| Variable | Default | Purpose |
 |---|---|---|
-| `photon_import_heap` | `24g` | heap de l'import (au-delà de ~RAM/2 → swap) |
-| `photon_import_threads` | `2` | threads d'indexation |
-| `photon_languages` | `en,fr,es,pt,de,it` | langues indexées |
-| `photon_server_heap` | `4g` | heap du serveur |
-| `photon_listen_ip` / `_port` | `127.0.0.1` / `2322` | écoute |
-| `photon_jar_checksum` | `""` | intégrité du jar, ex. `sha256:…` (vide = pas de contrôle) |
-| `photon_proxy` | `""` | proxy sortant |
-| `photon_min_ram_gb` | `48` | refus en dessous (`-e photon_force=true` pour forcer) |
+| `photon_import_heap` | `24g` | import heap (above ~RAM/2 → swap) |
+| `photon_import_threads` | `2` | indexing threads |
+| `photon_languages` | `en,fr,es,pt,de,it` | indexed languages |
+| `photon_server_heap` | `4g` | server heap |
+| `photon_listen_ip` / `_port` | `0.0.0.0` / `2322` | listen address (reachable from the LB) |
+| `photon_jar_checksum` | `""` | jar integrity, e.g. `sha256:…` (empty = no check) |
+| `photon_proxy` | pickup proxy (`group_vars/all.yml`) | outbound proxy (jar everywhere, dumps on the leader) |
+| `photon_force` | `false` | refresh the dumps and rebuild the index on the leader |
+| `force_resync` | `false` | push the index to the followers again |
+| `cleanup_legacy` | `false` (`group_vars/all.yml`) | purge leftovers from the old playbooks |
 
-Surcharge ponctuelle : `ansible-playbook playbook.yml -e photon_import_heap=16g`.
+One-off override: `ansible-playbook playbook.yml -e photon_import_heap=16g`.
 
-## Exploitation
+## Operations
 
-| Action | Commande |
+| Action | Command |
 |---|---|
-| Statut construction | `systemctl status photon-index-build` (`active (exited)` = terminé) |
-| Logs construction / serveur | `journalctl -u photon-index-build` / `journalctl -u photon` |
-| Démarrer / arrêter le serveur | `systemctl start\|stop\|restart photon` |
-| Reconstruire l'index | `sudo systemctl start photon-index-build` (réécrase) |
-| Tester | `curl '…/api?q=Buenos+Aires&limit=1'` · `/reverse?lat=-34.6&lon=-58.4` · `/status` |
+| Rebuild the index and redistribute it | `ansible-playbook playbook.yml -e photon_force=true` |
+| Resync a suspicious follower | `ansible-playbook playbook.yml -e force_resync=true` |
+| Build status (leader) | `systemctl status photon-index-build` (`active (exited)` = done) |
+| Build / server logs | `journalctl -u photon-index-build` / `journalctl -u photon` |
+| Start / stop a server | `systemctl start\|stop\|restart photon` |
+| LB health | `curl http://127.0.0.1/nginx_status` (from VM1) |
+| Smoke test | `curl '…/api?q=Buenos+Aires&limit=1'` · `/reverse?lat=-34.6&lon=-58.4` · `/status` |
 
-Accès depuis un poste : `ssh -L 2322:127.0.0.1:2322 <vm>` via le bastion, puis `curl localhost:2322`.
+A rebuild updates the `.build-id` marker of the leader's index; the next playbook run
+detects the difference and pushes the index to the followers on its own. A play
+relaunched while a build is running **joins** the build in progress instead of
+restarting it from scratch.
 
-## Dimensionnement
+## Coexistence with the old deployments
 
-Europe+BR+AR ≈ 40-60 M documents. Sur 24 Go l'import **échoue systématiquement vers 3,3 M docs**
-(heap trop gros → swap → timeout des bulks ; ou sans swap, débit qui s'effondre à ~500 docs/s
-faute de page cache pour les merges). Le README officiel Photon recommande **64 Go**. La RAM est
-le seul levier ; le rôle refuse de démarrer sous 48 Go.
+The VMs still carry the deployments from the legacy repo (`~/photon-deploy` on VM1).
+The new playbook **converges on its own** to the functional state, because both
+generations use the same anchor points:
 
-## Cas particuliers
+- same `photon.service` unit: the template replaces it, `daemon-reload` + restart;
+- followers: no `.build-id` in the new layout → the old service is stopped, the index
+  received over rsync, the new service started;
+- same `nginx.conf` and `conf.d/photon.conf`: the legacy HTTPS config is replaced by
+  the HTTP-only one (the :443 disappears, intended);
+- same rsync key `/root/.ssh/photon_rsync_ed25519` and same authorized user: reused
+  as-is.
 
-- **Proxy** : `-e photon_proxy=http://proxy:3128`.
-- **VM sans internet** : pré-stager le jar et les 3 `*.jsonl.zst` dans `/opt/photon/data/dumps/`
-  avant le play (les tâches `get_url` deviennent idempotentes), ou copier depuis un dépôt interne.
-- **Téléchargement interrompu** : supprimer le fichier partiel et relancer ; le contrôle
-  `zstd -t` du script protège l'import d'un dump tronqué.
-- **L'import n'est pas reprenable** : toute reconstruction repart de zéro.
+What does not converge: the legacy **orphaned data** (`/data/photon`: archives and
+extracts, tens of GB; the `/opt/photon/photon_data` symlink; `/var/log/photon`;
+the self-signed certificate). The play reports them and only deletes them on demand:
+`-e cleanup_legacy=true`. While they are there, rolling back to legacy stays possible;
+once purged, it is not.
 
-## Méthode d'import
+Two precautions outside the playbook:
 
-Concaténation des dumps JSON pipée dans `photon import` (l'importeur ignore les en-têtes en
-double). Référence : [nominatim.org, 13/08/2025](https://nominatim.org/2025/08/13/photon-exports-renewed.html).
-Dumps `-1.0-` (format du jar 1.2.0). `data/` est gitignored.
+- **Freeze the old repo**: archive or delete `~/photon-deploy` on VM1. An
+  `ansible-playbook deploy_photon.yml` run out of habit would clobber the new unit.
+- **Follower disk space**: the new index lives under `/opt/photon/data` (the old
+  layout kept heavy data on `/data`). Check `df -h /opt` on A2/A3 before the first
+  run; purging the legacy data frees `/data`, not `/opt`.
+
+## Sizing
+
+Europe+BR+AR ≈ 40-60 M documents. With 24 GB the import **systematically fails around
+3.3 M docs** (heap too large → swap → bulk timeouts; or without swap, throughput
+collapsing to ~500 docs/s for lack of page cache during the merges). The official
+Photon README recommends **64 GB** on the importing node. Followers import nothing:
+serving the index only needs `photon_server_heap` + page cache.
+
+## Edge cases
+
+- **Leader VM without internet**: pre-stage the jar and the 3 `*.jsonl.zst` in
+  `/opt/photon/data/dumps/` before the play (the `get_url` tasks become idempotent).
+- **Interrupted download**: delete the partial file and re-run; the script's
+  `zstd -t` check protects the import from a truncated dump.
+- **Interrupted rsync**: re-run the play; `--partial` resumes where it left off.
+- **The import is not resumable**: any rebuild starts from scratch.
+- **Index built before the marker was introduced**: the play writes a `.build-id`
+  on the leader's index on first pass, then distributes normally.
+
+## Import method
+
+The JSON dumps are concatenated and piped into `photon import` (the importer ignores
+duplicate headers). Reference: [nominatim.org, 13/08/2025](https://nominatim.org/2025/08/13/photon-exports-renewed.html).
+`-1.0-` dumps (format of the 1.2.0 jar). `data/` is gitignored.

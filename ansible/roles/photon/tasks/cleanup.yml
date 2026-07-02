@@ -1,0 +1,28 @@
+---
+# Leftovers from the old playbooks (legacy photon repo): index and archives
+# under /data/photon, the /opt/photon/photon_data symlink, GC logs. They do
+# not interfere with the new deployment but hold tens of GB; purging them
+# removes the quick rollback to legacy, hence opt-in.
+- name: Detect legacy leftovers
+  become: true
+  ansible.builtin.stat:
+    path: /data/photon
+  register: photon_legacy_data
+
+- name: Report legacy leftovers
+  ansible.builtin.debug:
+    msg: >-
+      Leftovers from the old deployments found (/data/photon).
+      Re-run with -e cleanup_legacy=true to purge them.
+  when: photon_legacy_data.stat.exists and not cleanup_legacy | bool
+
+- name: Purge legacy leftovers
+  become: true
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /data/photon
+    - /opt/photon/photon_data
+    - /var/log/photon
+  when: cleanup_legacy | bool

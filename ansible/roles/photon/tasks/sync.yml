@@ -1,0 +1,108 @@
+---
+# The .build-id marker travels with the index: if it differs from the
+# leader's (or is missing), the local index is stale and gets resynced.
+- name: Read the leader's index marker
+  become: true
+  ansible.builtin.slurp:
+    src: "{{ photon_app_dir }}/data/photon_data/.build-id"
+  delegate_to: "{{ photon_leader }}"
+  register: photon_leader_marker
+
+- name: Check the local index marker
+  become: true
+  ansible.builtin.stat:
+    path: "{{ photon_app_dir }}/data/photon_data/.build-id"
+  register: photon_local_marker_stat
+
+- name: Read the local index marker
+  become: true
+  ansible.builtin.slurp:
+    src: "{{ photon_app_dir }}/data/photon_data/.build-id"
+  register: photon_local_marker
+  when: photon_local_marker_stat.stat.exists
+
+- name: Decide whether to sync
+  ansible.builtin.set_fact:
+    photon_sync_needed: >-
+      {{ force_resync | bool
+         or not photon_local_marker_stat.stat.exists
+         or photon_local_marker.content != photon_leader_marker.content }}
+
+- name: Sync the index from the leader
+  when: photon_sync_needed | bool
+  block:
+    - name: Create /root/.ssh on the leader
+      become: true
+      ansible.builtin.file:
+        path: "{{ photon_rsync_key | dirname }}"
+        state: directory
+        mode: "0700"
+      delegate_to: "{{ photon_leader }}"
+
+    - name: Generate the rsync key on the leader
+      become: true
+      ansible.builtin.command: >-
+        ssh-keygen -t ed25519 -N "" -C photon-rsync -f {{ photon_rsync_key }}
+      args:
+        creates: "{{ photon_rsync_key }}"
+      delegate_to: "{{ photon_leader }}"
+
+    - name: Read the leader's public key
+      become: true
+      ansible.builtin.slurp:
+        src: "{{ photon_rsync_key }}.pub"
+      delegate_to: "{{ photon_leader }}"
+      register: photon_rsync_pubkey
+
+    - name: Authorize the leader's key on this node
+      become: true
+      ansible.posix.authorized_key:
+        user: "{{ ansible_user }}"
+        key: "{{ photon_rsync_pubkey.content | b64decode | trim }}"
+        state: present
+
+    - name: Stop photon during the sync
+      become: true
+      ansible.builtin.systemd:
+        name: photon
+        state: stopped
+      failed_when: false
+
+    # rsync connects as {{ ansible_user }}: receive into a directory it
+    # owns, then chown and swap atomically. recurse also makes leftovers
+    # from an interrupted sync (already chowned to photon) writable again.
+    - name: Prepare the receiving directory
+      become: true
+      ansible.builtin.file:
+        path: "{{ photon_app_dir }}/data/photon_data.sync"
+        state: directory
+        owner: "{{ ansible_user }}"
+        recurse: true
+
+    - name: Push the index from the leader (rsync)
+      become: true
+      ansible.posix.synchronize:
+        src: "{{ photon_app_dir }}/data/photon_data/"
+        dest: "{{ photon_app_dir }}/data/photon_data.sync/"
+        mode: push
+        private_key: "{{ photon_rsync_key }}"
+        rsync_opts:
+          - "--delete"
+          - "--partial"
+      delegate_to: "{{ photon_leader }}"
+
+    - name: Give the index back to the photon user
+      become: true
+      ansible.builtin.file:
+        path: "{{ photon_app_dir }}/data/photon_data.sync"
+        state: directory
+        owner: "{{ photon_user }}"
+        group: "{{ photon_user }}"
+        recurse: true
+
+    - name: Swap in the new index
+      become: true
+      ansible.builtin.shell: >-
+        rm -rf {{ photon_app_dir }}/data/photon_data &&
+        mv {{ photon_app_dir }}/data/photon_data.sync {{ photon_app_dir }}/data/photon_data
+      changed_when: true
