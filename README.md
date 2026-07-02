@@ -1,4 +1,4 @@
-# Photon geocoder — Operations guide
+# Photon geocoder: DEX
 
 **Photon 1.2.0** geocoder (Europe + Brazil + Argentina), deployed with **Ansible** on a
 3-VM cluster behind an Nginx load balancer. The index is built on the **leader** from
@@ -45,10 +45,20 @@ From **VM1** (SRVLH-GEO-A1, Delinea access), inside `tmux` — the first index b
 (~1-3 h) happens during the play:
 
 ```bash
-git clone https://github.com/akramnoui/photon-geocoder.git && cd photon-geocoder/ansible
+export https_proxy=http://proxy-prod.paris.pickup.local:3128
+
+# fetch the repo as a plain tarball (no git, no .git on the VM)
+curl -L -o /tmp/pg.tgz https://github.com/akramnoui/photon-geocoder/archive/refs/heads/main.tar.gz
+rm -rf ~/photon-geocoder
+tar xzf /tmp/pg.tgz -C ~ && mv ~/photon-geocoder-main ~/photon-geocoder && rm /tmp/pg.tgz
+
+cd ~/photon-geocoder/ansible
 tmux new -s photon
 ansible-playbook playbook.yml --ask-become-pass
 ```
+
+Updating the deployment = re-run the same `curl` + `tar` block (it wipes and replaces
+`~/photon-geocoder`, so the VM copy always matches `main`), then re-run the playbook.
 
 The play: leader (index build if missing, wait for completion) → followers one at a
 time (index rsync if stale) → servers started and checked on :2322 → Nginx LB.
