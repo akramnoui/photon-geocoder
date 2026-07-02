@@ -6,6 +6,8 @@ photon_java: /usr/bin/java
 photon_version: "1.2.0"
 photon_jar: "{{ photon_app_dir }}/photon-{{ photon_version }}.jar"
 photon_jar_url: "https://github.com/komoot/photon/releases/download/{{ photon_version }}/photon-{{ photon_version }}.jar"
+# Intégrité du jar (recommandé). Format get_url, ex. "sha256:abc123...". Vide = pas de contrôle.
+photon_jar_checksum: ""
 photon_dump_base: "https://download1.graphhopper.com/public"
 photon_dump_urls:
   - "{{ photon_dump_base }}/europe/photon-dump-europe-1.0-latest.jsonl.zst"

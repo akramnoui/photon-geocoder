@@ -51,6 +51,7 @@ curl 'http://127.0.0.1:2322/api?q=Paris&limit=1'
 | `photon_languages` | `en,fr,es,pt,de,it` | langues indexées |
 | `photon_server_heap` | `4g` | heap du serveur |
 | `photon_listen_ip` / `_port` | `127.0.0.1` / `2322` | écoute |
+| `photon_jar_checksum` | `""` | intégrité du jar, ex. `sha256:…` (vide = pas de contrôle) |
 | `photon_proxy` | `""` | proxy sortant |
 | `photon_min_ram_gb` | `48` | refus en dessous (`-e photon_force=true` pour forcer) |
 

@@ -63,6 +63,7 @@
   ansible.builtin.get_url:
     url: "{{ photon_jar_url }}"
     dest: "{{ photon_jar }}"
+    checksum: "{{ photon_jar_checksum | default(omit, true) }}"
     owner: "{{ photon_user }}"
     group: "{{ photon_user }}"
     mode: "0644"
