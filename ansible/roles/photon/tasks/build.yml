@@ -26,8 +26,13 @@
   changed_when: true
   when: photon_data_dir != photon_app_dir + '/data'
 
-# force: a requested rebuild (photon_force) also refreshes the "latest"
-# dumps, otherwise we would re-import the same data.
+- name: List dumps already present
+  become: true
+  ansible.builtin.find:
+    paths: "{{ photon_data_dir }}/dumps"
+    patterns: "*.jsonl.zst"
+  register: photon_present_dumps
+
 - name: Download the JSON dumps
   become: true
   ansible.builtin.get_url:
@@ -43,6 +48,10 @@
   until: photon_dumps_dl is succeeded
   retries: 3
   delay: 30
+  when: >-
+    photon_force | bool
+    or (item | basename)
+       not in (photon_present_dumps.files | map(attribute='path') | map('basename') | list)
   environment:
     https_proxy: "{{ photon_proxy }}"
     http_proxy: "{{ photon_proxy }}"

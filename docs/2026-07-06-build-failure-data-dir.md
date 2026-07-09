@@ -42,7 +42,7 @@ d'archives).
 | `roles/photon/templates/photon-build-index.sh.j2` | `data_dir` pointe sur `photon_data_dir`. |
 | `roles/photon/templates/photon.service.j2` | `ConditionPathExists` et `-data-dir` pointent sur `photon_data_dir`. |
 | `roles/photon/tasks/main.yml` | L'arborescence est créée sur `photon_data_dir`. |
-| `roles/photon/tasks/build.yml` | Chemins sur `photon_data_dir` ; migration des dumps déjà téléchargés depuis l'ancien emplacement (évite 14 GB de re-téléchargement via le proxy) ; garde-fou d'espace disque avant de lancer le build (assert : au moins `photon_build_min_free_gb` libres sur le volume de `photon_data_dir`, sinon échec immédiat plutôt que crash après des heures d'import) ; fenêtre d'attente du build portée de 4 h à 8 h (240 x 120 s), l'ancien build est mort à 2 h de wall avec seulement ~30 % du staging écrit. |
+| `roles/photon/tasks/build.yml` | Chemins sur `photon_data_dir` ; migration des dumps déjà téléchargés depuis l'ancien emplacement (évite 14 GB de re-téléchargement via le proxy) ; garde-fou d'espace disque avant de lancer le build (assert : au moins `photon_build_min_free_gb` libres sur le volume de `photon_data_dir`, sinon échec immédiat plutôt que crash après des heures d'import) ; fenêtre d'attente du build portée de 4 h à 8 h (240 x 120 s), l'ancien build est mort à 2 h de wall avec seulement ~30 % du staging écrit ; téléchargement des dumps gaté sur la présence du fichier (voir ci-dessous). |
 | `roles/photon/tasks/sync.yml` | Tous les chemins followers (marker, réception rsync, swap) sur `photon_data_dir`. |
 | `roles/photon/tasks/cleanup.yml` | Suppression automatique de l'ancien data tree `/opt/photon/data` quand `photon_data_dir` a été déplacé (les dumps ont été migrés avant, le staging résiduel est mort). |
 | `README.md` | Sections « disk space » et « pre-stage dumps » mises à jour. |
@@ -93,3 +93,27 @@ journalctl -u photon-index-build.service -f
 - **`cleanup_legacy=true`** : purge `/data/photon` (legacy). Sans objet si le
   pré-nettoyage manuel ci-dessus a été fait ; reste sans danger pour
   `/data/photon-geocoder`.
+
+## Téléchargement des dumps : figé sur la présence du fichier
+
+`get_url` avec `force: false` n'est **pas** un simple « skip si le fichier
+existe » : quand le fichier est présent, il fait une requête conditionnelle
+`If-Modified-Since` basée sur la mtime locale. Comme graphhopper publie des
+dumps « latest » (URL fixe, contenu qui change), dès que graphhopper republie
+une version plus récente le serveur répond 200 et le dump de 14 GB est
+re-téléchargé, alors même que le fichier est déjà là. Observé le 2026-07-09 :
+un run non-`force` a re-tiré l'europe parce que la version publiée était plus
+récente que celle du 6 juillet.
+
+Le task est désormais gaté : le download ne s'exécute que si le fichier est
+**absent** du dossier `dumps`, ou si `photon_force=true`. Conséquences :
+
+- run normal, dumps présents : **aucun accès réseau**, on builde sur les dumps
+  locaux, quelle que soit la version publiée entre-temps ;
+- run avec `-e photon_force=true` : rafraîchit volontairement les dumps
+  (`force: true` sur get_url force le remplacement), puis rebuild ;
+- premier run ou dump manquant : téléchargement normal.
+
+Pour rafraîchir un seul dump ponctuellement sans `photon_force` global :
+supprimer le fichier concerné dans `{{ photon_data_dir }}/dumps/` avant le run,
+le task le re-téléchargera car absent.
