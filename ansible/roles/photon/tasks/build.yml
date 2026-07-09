@@ -116,10 +116,6 @@
     quiet: true
   when: photon_build_needed and not photon_build_running
 
-# stop then start: `start` alone is a no-op when the oneshot unit
-# (RemainAfterExit) stayed active from a previous build, and `restart
-# --no-block` lets the wait below read the previous build's state.
-# A build already in progress is not restarted: we wait for it.
 - name: Start the index build (detached service)
   become: true
   ansible.builtin.shell: >-

@@ -7,7 +7,7 @@ photon_java: /usr/bin/java
 photon_version: "1.2.0"
 photon_jar: "{{ photon_app_dir }}/photon-{{ photon_version }}.jar"
 photon_jar_url: "https://github.com/komoot/photon/releases/download/{{ photon_version }}/photon-{{ photon_version }}.jar"
-# Jar integrity check (recommended). get_url format, e.g. "sha256:abc123...". Empty = no check.
+
 photon_jar_checksum: ""
 photon_dump_base: "https://download1.graphhopper.com/public"
 photon_dump_urls:
@@ -15,19 +15,17 @@ photon_dump_urls:
   - "{{ photon_dump_base }}/south-america/brazil/photon-dump-brazil-1.0-latest.jsonl.zst"
   - "{{ photon_dump_base }}/south-america/argentina/photon-dump-argentina-1.0-latest.jsonl.zst"
 
-photon_import_heap: "24g"   # above ~RAM/2 the VM swaps during the merges
+photon_import_heap: "24g"  
 photon_import_threads: 2
 photon_build_min_free_gb: 150
 photon_languages: "en,fr,es,pt,de,it"
 
 photon_server_heap: "4g"
-photon_listen_ip: "0.0.0.0"   # nodes must be reachable from the LB
+photon_listen_ip: "0.0.0.0"
 photon_listen_port: 2322
 
 photon_proxy: ""
 
-# Leader = first host of the group. It builds the index; the others
-# receive it over rsync (dedicated key generated on the leader).
 photon_leader: "{{ ansible_play_hosts_all[0] }}"
 photon_is_leader: "{{ inventory_hostname == photon_leader }}"
 photon_rsync_key: /root/.ssh/photon_rsync_ed25519
