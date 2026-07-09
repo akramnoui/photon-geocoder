@@ -3,6 +3,8 @@
 # jar; the dumps are only downloaded on the leader.
 photon_proxy: "http://proxy-prod.paris.pickup.local:3128"
 
+photon_data_dir: /data/photon-geocoder
+
 # -e cleanup_legacy=true: purge leftovers from the old playbooks
 # (/data/photon, old symlink, GC logs, the LB's self-signed certificate).
 cleanup_legacy: false

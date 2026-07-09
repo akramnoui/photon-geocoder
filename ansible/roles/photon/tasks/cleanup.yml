@@ -26,3 +26,10 @@
     - /opt/photon/photon_data
     - /var/log/photon
   when: cleanup_legacy | bool
+
+- name: Remove the old data tree under the app dir
+  become: true
+  ansible.builtin.file:
+    path: "{{ photon_app_dir }}/data"
+    state: absent
+  when: photon_data_dir != photon_app_dir + '/data'

@@ -128,9 +128,13 @@ Two precautions outside the playbook:
 
 - **Freeze the old repo**: archive or delete `~/photon-deploy` on VM1. An
   `ansible-playbook deploy_photon.yml` run out of habit would clobber the new unit.
-- **Follower disk space**: the new index lives under `/opt/photon/data` (the old
-  layout kept heavy data on `/data`). Check `df -h /opt` on A2/A3 before the first
-  run; purging the legacy data frees `/data`, not `/opt`.
+- **Disk space**: dumps, staging and the served index live under
+  `photon_data_dir` (`/data/photon-geocoder` in this environment, on the 200 GB
+  `/data` LV). The root FS must never host them: the 64 GB `/` cannot absorb a
+  build, and the embedded OpenSearch flips the index read-only past the 95%
+  flood-stage watermark (build of 2026-07-06, dead after 17 h of CPU). The play
+  refuses to start a build with less than `photon_build_min_free_gb` free on
+  the data volume.
 
 ## Sizing
 
@@ -143,7 +147,8 @@ serving the index only needs `photon_server_heap` + page cache.
 ## Edge cases
 
 - **Leader VM without internet**: pre-stage the jar and the 3 `*.jsonl.zst` in
-  `/opt/photon/data/dumps/` before the play (the `get_url` tasks become idempotent).
+  `{{ photon_data_dir }}/dumps/` before the play (the `get_url` tasks become
+  idempotent).
 - **Interrupted download**: delete the partial file and re-run; the script's
   `zstd -t` check protects the import from a truncated dump.
 - **Interrupted rsync**: re-run the play; `--partial` resumes where it left off.

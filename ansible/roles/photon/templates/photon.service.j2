@@ -2,13 +2,13 @@
 [Unit]
 Description=Photon geocoding server
 After=network-online.target
-ConditionPathExists={{ photon_app_dir }}/data/photon_data
+ConditionPathExists={{ photon_data_dir }}/photon_data
 
 [Service]
 Type=simple
 User={{ photon_user }}
 Group={{ photon_user }}
-ExecStart={{ photon_java }} --enable-native-access=ALL-UNNAMED -Xmx{{ photon_server_heap }} -jar {{ photon_jar }} serve -data-dir {{ photon_app_dir }}/data -listen-ip {{ photon_listen_ip }} -listen-port {{ photon_listen_port }}
+ExecStart={{ photon_java }} --enable-native-access=ALL-UNNAMED -Xmx{{ photon_server_heap }} -jar {{ photon_jar }} serve -data-dir {{ photon_data_dir }} -listen-ip {{ photon_listen_ip }} -listen-port {{ photon_listen_port }}
 Restart=on-failure
 RestartSec=5
 

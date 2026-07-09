@@ -4,20 +4,20 @@
 - name: Read the leader's index marker
   become: true
   ansible.builtin.slurp:
-    src: "{{ photon_app_dir }}/data/photon_data/.build-id"
+    src: "{{ photon_data_dir }}/photon_data/.build-id"
   delegate_to: "{{ photon_leader }}"
   register: photon_leader_marker
 
 - name: Check the local index marker
   become: true
   ansible.builtin.stat:
-    path: "{{ photon_app_dir }}/data/photon_data/.build-id"
+    path: "{{ photon_data_dir }}/photon_data/.build-id"
   register: photon_local_marker_stat
 
 - name: Read the local index marker
   become: true
   ansible.builtin.slurp:
-    src: "{{ photon_app_dir }}/data/photon_data/.build-id"
+    src: "{{ photon_data_dir }}/photon_data/.build-id"
   register: photon_local_marker
   when: photon_local_marker_stat.stat.exists
 
@@ -74,7 +74,7 @@
     - name: Prepare the receiving directory
       become: true
       ansible.builtin.file:
-        path: "{{ photon_app_dir }}/data/photon_data.sync"
+        path: "{{ photon_data_dir }}/photon_data.sync"
         state: directory
         owner: "{{ ansible_user }}"
         recurse: true
@@ -82,8 +82,8 @@
     - name: Push the index from the leader (rsync)
       become: true
       ansible.posix.synchronize:
-        src: "{{ photon_app_dir }}/data/photon_data/"
-        dest: "{{ photon_app_dir }}/data/photon_data.sync/"
+        src: "{{ photon_data_dir }}/photon_data/"
+        dest: "{{ photon_data_dir }}/photon_data.sync/"
         mode: push
         private_key: "{{ photon_rsync_key }}"
         rsync_opts:
@@ -94,7 +94,7 @@
     - name: Give the index back to the photon user
       become: true
       ansible.builtin.file:
-        path: "{{ photon_app_dir }}/data/photon_data.sync"
+        path: "{{ photon_data_dir }}/photon_data.sync"
         state: directory
         owner: "{{ photon_user }}"
         group: "{{ photon_user }}"
@@ -103,6 +103,6 @@
     - name: Swap in the new index
       become: true
       ansible.builtin.shell: >-
-        rm -rf {{ photon_app_dir }}/data/photon_data &&
-        mv {{ photon_app_dir }}/data/photon_data.sync {{ photon_app_dir }}/data/photon_data
+        rm -rf {{ photon_data_dir }}/photon_data &&
+        mv {{ photon_data_dir }}/photon_data.sync {{ photon_data_dir }}/photon_data
       changed_when: true

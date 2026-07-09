@@ -48,7 +48,7 @@
     mode: "0755"
   loop:
     - "{{ photon_app_dir }}"
-    - "{{ photon_app_dir }}/data"
+    - "{{ photon_data_dir }}"
 
 - name: Download the Photon jar
   become: true

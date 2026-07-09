@@ -2,11 +2,29 @@
 - name: Create the dumps directory
   become: true
   ansible.builtin.file:
-    path: "{{ photon_app_dir }}/data/dumps"
+    path: "{{ photon_data_dir }}/dumps"
     state: directory
     owner: "{{ photon_user }}"
     group: "{{ photon_user }}"
     mode: "0755"
+
+- name: Look for dumps left in the old data dir
+  become: true
+  ansible.builtin.find:
+    paths: "{{ photon_app_dir }}/data/dumps"
+    patterns: "*.jsonl.zst"
+  register: photon_old_dumps
+  when: photon_data_dir != photon_app_dir + '/data'
+
+- name: Migrate the dumps from the old data dir
+  become: true
+  ansible.builtin.command: >-
+    mv -n {{ item.path }} {{ photon_data_dir }}/dumps/
+  loop: "{{ photon_old_dumps.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path }}"
+  changed_when: true
+  when: photon_data_dir != photon_app_dir + '/data'
 
 # force: a requested rebuild (photon_force) also refreshes the "latest"
 # dumps, otherwise we would re-import the same data.
@@ -14,7 +32,7 @@
   become: true
   ansible.builtin.get_url:
     url: "{{ item }}"
-    dest: "{{ photon_app_dir }}/data/dumps/{{ item | basename }}"
+    dest: "{{ photon_data_dir }}/dumps/{{ item | basename }}"
     force: "{{ photon_force | bool }}"
     owner: "{{ photon_user }}"
     group: "{{ photon_user }}"
@@ -55,7 +73,7 @@
 - name: Check for an existing index
   become: true
   ansible.builtin.stat:
-    path: "{{ photon_app_dir }}/data/photon_data"
+    path: "{{ photon_data_dir }}/photon_data"
   register: photon_index
 
 - name: Check the build service state
@@ -70,6 +88,25 @@
     photon_build_needed: "{{ photon_force | bool or not photon_index.stat.exists }}"
     photon_build_running: "{{ photon_build_active.stdout == 'activating' }}"
 
+- name: Check the free space on the data volume
+  become: true
+  ansible.builtin.shell: df --output=avail -BG {{ photon_data_dir }} | tail -1 | tr -dc '0-9'
+  register: photon_data_free
+  changed_when: false
+  when: photon_build_needed and not photon_build_running
+
+- name: Require enough space for the build
+  ansible.builtin.assert:
+    that:
+      - photon_data_free.stdout | int >= photon_build_min_free_gb | int
+    fail_msg: >-
+      {{ photon_data_free.stdout | default('?') }} GB free on
+      {{ photon_data_dir }}, {{ photon_build_min_free_gb }} GB required for
+      the build (staging + previous index coexist until the final swap).
+      Free space or extend the volume before retrying.
+    quiet: true
+  when: photon_build_needed and not photon_build_running
+
 # stop then start: `start` alone is a no-op when the oneshot unit
 # (RemainAfterExit) stayed active from a previous build, and `restart
 # --no-block` lets the wait below read the previous build's state.
@@ -83,12 +120,12 @@
   when: photon_build_needed and not photon_build_running
   notify: Restart photon
 
-- name: Wait for the build to finish (~1-3 h)
+- name: Wait for the build to finish (up to 8 h)
   become: true
   ansible.builtin.command: systemctl is-active photon-index-build.service
   register: photon_build_state
   until: photon_build_state.stdout in ['active', 'failed']
-  retries: 120
+  retries: 240
   delay: 120
   changed_when: false
   failed_when: photon_build_state.stdout != 'active'
@@ -99,13 +136,13 @@
 - name: Check for the build marker
   become: true
   ansible.builtin.stat:
-    path: "{{ photon_app_dir }}/data/photon_data/.build-id"
+    path: "{{ photon_data_dir }}/photon_data/.build-id"
   register: photon_build_marker
 
 - name: Write the build marker if missing
   become: true
   ansible.builtin.copy:
-    dest: "{{ photon_app_dir }}/data/photon_data/.build-id"
+    dest: "{{ photon_data_dir }}/photon_data/.build-id"
     content: "{{ ansible_date_time.iso8601 }}\n"
     owner: "{{ photon_user }}"
     group: "{{ photon_user }}"

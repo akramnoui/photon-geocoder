@@ -1,5 +1,6 @@
 ---
 photon_app_dir: /opt/photon
+photon_data_dir: "{{ photon_app_dir }}/data"
 photon_user: photon
 photon_java: /usr/bin/java
 
@@ -16,6 +17,7 @@ photon_dump_urls:
 
 photon_import_heap: "24g"   # above ~RAM/2 the VM swaps during the merges
 photon_import_threads: 2
+photon_build_min_free_gb: 150
 photon_languages: "en,fr,es,pt,de,it"
 
 photon_server_heap: "4g"
