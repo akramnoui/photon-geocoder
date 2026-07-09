@@ -57,6 +57,40 @@ if result.features is empty:
     address is not geocodable, stop
 ```
 
+## Construire la requête (FR)
+
+Comment passer d'un enregistrement adresse (ERP, ELK, CRM...) à la requête Photon :
+
+1. **Champs du texte libre `q`** : `adresse, code postal, ville`, dans cet ordre,
+   joints par `", "`. Omettre les champs vides et les artefacts de données
+   (`nan`, `none`, `<na>`, `.`, `*`, `-`) : ne jamais les envoyer tels quels.
+2. **Le pays ne va PAS dans le texte libre.** Il passe uniquement par le paramètre
+   `countrycode`, en **ISO 3166-1 alpha-2** (`FR`, `PT`, `DE`, `GB`...). Attention :
+   les codes pays ERP internes (type plaque) ne sont pas des codes ISO, il faut les
+   convertir. Les pièges classiques :
+
+   | ERP | ISO | | ERP | ISO |
+   |---|---|---|---|---|
+   | `F` | `FR` | | `EST` | `EE` |
+   | `D` | `DE` | | `FIN` | `FI` |
+   | `E` | `ES` | | `IRL` | `IE` |
+   | `B` | `BE` | | `SLO` | `SI` |
+   | `I` | `IT` | | `RA` | `AR` |
+   | `S` | `SE` | | `N` | `NO` |
+   | `A` | `AT` | | `P` | `PT` |
+
+3. **URL-encoder** la valeur de `q` (espaces, accents, apostrophes).
+4. Ajouter `limit=1` pour géocoder une adresse unique.
+
+Exemple : l'enregistrement `route de thionville / 57050 / woippy / F` devient :
+
+```
+GET /api?q=route%20de%20thionville%2C%2057050%2C%20woippy&countrycode=FR&limit=1
+```
+
+En cas de `"features": []`, rejouer en structuré avec les mêmes champs éclatés
+(`street`, `postcode`, `city`) et le même `countrycode` (section 2).
+
 ## 3. Reverse geocoding
 
 Coordinates to nearest address:
