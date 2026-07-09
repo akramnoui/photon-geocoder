@@ -32,6 +32,26 @@ The playbook describes the target state and converges idempotently: an up-to-dat
 is left alone, a stale node is resynced, a fresh node is installed. `serial: 1` rolls
 one node at a time, so the cluster keeps serving during a redeploy.
 
+## How it decides what to do
+
+The whole leader/follower dance hinges on one file: `.build-id`, a timestamp written
+inside the index at the end of every build.
+
+- The leader builds only if there is no index yet (or `-e photon_force=true`). The
+  build runs as a detached systemd unit, so it survives a lost Delinea session; the
+  play just waits for it. If a build is already running, the play waits for that one
+  instead of killing it.
+- Each follower compares its `.build-id` with the leader's. Same marker: nothing to
+  do. Different or missing: stop photon, rsync the index over, swap, restart. The
+  marker travels inside the index, so the two can't drift apart.
+- A rebuild therefore propagates by itself: it stamps a new `.build-id` on the
+  leader, and the next run sees the mismatch and pushes the index to the followers.
+- Every node ends the same way: photon enabled, started, and answering on :2322
+  before the play moves to the next one.
+
+Run the playbook twice in a row: the second pass changes nothing. That's the test
+that everything above works.
+
 ## Prerequisites
 
 Linux VMs (Debian/Ubuntu or RHEL), `sudo`, **64 GB RAM on the leader** (the import
