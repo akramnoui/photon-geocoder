@@ -8,6 +8,8 @@
     group: "{{ photon_user }}"
     mode: "0755"
 
+# uniquement pour éviter de relancer le build inutilement sur les anciens index dans le PoC,
+# mais pas nécessaire pour les index construits avec le script de build qui crée un marqueur de build
 - name: Look for dumps left in the old data dir
   become: true
   ansible.builtin.find:
@@ -125,7 +127,7 @@
   when: photon_build_needed and not photon_build_running
   notify: Restart photon
 
-- name: Wait for the build to finish (up to 8 h)
+- name: Wait for the build to finish
   become: true
   ansible.builtin.command: systemctl is-active photon-index-build.service
   register: photon_build_state
@@ -134,10 +136,12 @@
   delay: 120
   changed_when: false
   failed_when: photon_build_state.stdout != 'active'
-  when: photon_build_needed or photon_build_running
+  when: photon_build_needed or photon_build_runnin
 
-# An index built before the marker was introduced gets one here; the
-# build script writes it itself for subsequent builds.
+
+# introduit pour les index construit avant la version 1.2.0, qui ne laissent pas de marqueur de build; à la base 
+# le script de build crée des marqueurs de build pour éviter de relancer le build inutilement, mais les index construits avant la version 1.2.0 n'ont pas de marqueur, 
+# donc on en crée un pour éviter de relancer le build inutilement sur les anciens index
 - name: Check for the build marker
   become: true
   ansible.builtin.stat:

@@ -1,6 +1,6 @@
 ---
-# The .build-id marker travels with the index: if it differs from the
-# leader's (or is missing), the local index is stale and gets resynced.
+# The .build-id marker est synchronisé avec l'index: si il diffère de celui du
+# leader (ou est manquant), l'index local est obsolète et est resynchronisé.
 - name: Read the leader's index marker
   become: true
   ansible.builtin.slurp:
@@ -68,9 +68,6 @@
         state: stopped
       failed_when: false
 
-    # rsync connects as {{ ansible_user }}: receive into a directory it
-    # owns, then chown and swap atomically. recurse also makes leftovers
-    # from an interrupted sync (already chowned to photon) writable again.
     - name: Prepare the receiving directory
       become: true
       ansible.builtin.file:

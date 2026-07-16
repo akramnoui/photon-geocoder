@@ -19,6 +19,10 @@ photon_import_heap: "24g"
 photon_import_threads: 2
 photon_build_min_free_gb: 150
 photon_languages: "en,fr,es,pt,de,it"
+# Les langues sont utilisées pour lancer l'indexation sur ces langues en plus des langues par défaut 
+# (qui sont celles des dumps). Cela permet d'avoir un index multilingue même si les dumps ne contiennent pas toutes les langues souhaitées. 
+# Par exemple, pour une carte Pologne, les dumps contiennent les langues pl et en, mais pas fr. 
+# En ajoutant fr dans photon_languages, on aura un index qui contient aussi les noms français des lieux de Pologne.
 
 photon_server_heap: "4g"
 photon_listen_ip: "0.0.0.0"

@@ -27,8 +27,6 @@
     fail_msg: "Java 21 required; {{ photon_java }} -> {{ photon_java_version.stderr_lines | first | default('?') }}"
     quiet: true
 
-# home is deliberately not managed: the legacy user has a different one and
-# usermod -d fails while the service is running. It plays no role anyway.
 - name: Create the service user
   become: true
   ansible.builtin.user:

@@ -27,10 +27,7 @@ Rôles Ansible :
 - **lb** : Nginx en HTTP simple sur :80, upstream généré depuis le groupe `photon`
   de l'inventaire (ajouter un nœud = éditer l'inventaire + relancer).
 
-Le playbook décrit l'état cible et converge de façon idempotente : un nœud à jour
-n'est pas touché, un nœud en retard est resynchronisé, un nœud neuf est installé.
-`serial: 1` déroule un nœud à la fois, le cluster continue de servir pendant un
-redéploiement.
+Le playbook est idempotent
 
 ## Logique de déploiement
 
@@ -60,13 +57,12 @@ avec ansible-core 2.14 (paquet RHEL), l'épingler :
 
 ## Déploiement
 
-Depuis la **VM1** (SRVLH-GEO-A1, accès Delinea), dans `tmux` : la première
-construction d'index (~1-3 h) se déroule pendant le play :
+Depuis la **VM1** (SRVLH-GEO-A1), dans `tmux` : la première
+construction d'index  se déroule pendant le play :
 
 ```bash
 export https_proxy=http://proxy-prod.paris.pickup.local:3128
 
-# récupérer le repo en simple tarball (pas de git, pas de .git sur la VM)
 curl -L -o /tmp/pg.tgz https://github.com/akramnoui/photon-geocoder/archive/refs/heads/main.tar.gz
 rm -rf ~/photon-geocoder
 tar xzf /tmp/pg.tgz -C ~ && mv ~/photon-geocoder-main ~/photon-geocoder && rm /tmp/pg.tgz
@@ -122,56 +118,9 @@ suivant du playbook détecte l'écart et pousse l'index vers les followers tout 
 Un play relancé pendant qu'un build tourne **rejoint** le build en cours au lieu de
 le relancer de zéro.
 
-## Cohabitation avec les anciens déploiements
 
-Les VM portent encore les déploiements du repo legacy (`~/photon-deploy` sur la VM1).
-Le nouveau playbook **converge tout seul** vers l'état fonctionnel, parce que les deux
-générations utilisent les mêmes points d'ancrage :
 
-- même unit `photon.service` : le template la remplace, `daemon-reload` + restart ;
-- followers : pas de `.build-id` dans le nouveau layout → l'ancien service est arrêté,
-  l'index reçu par rsync, le nouveau service démarré ;
-- mêmes `nginx.conf` et `conf.d/photon.conf` : la conf HTTPS legacy est remplacée par
-  la conf HTTP pure (le :443 disparaît, voulu) ;
-- même clé rsync `/root/.ssh/photon_rsync_ed25519` et même utilisateur autorisé :
-  réutilisés tels quels.
 
-Ce qui ne converge pas : les **données orphelines** legacy (`/data/photon` : archives
-et extracts, des dizaines de Go ; le symlink `/opt/photon/photon_data` ;
-`/var/log/photon` ; le certificat auto-signé). Le play les signale et ne les supprime
-que sur demande : `-e cleanup_legacy=true`. Tant qu'elles sont là, le retour arrière
-vers le legacy reste possible ; une fois purgées, non.
-
-Deux précautions hors playbook :
-
-- **Geler l'ancien repo** : archiver ou supprimer `~/photon-deploy` sur la VM1. Un
-  `ansible-playbook deploy_photon.yml` lancé par habitude écraserait la nouvelle unit.
-- **Espace disque** : dumps, staging et index servi vivent sous `photon_data_dir`
-  (`/data/photon-geocoder` dans cet environnement, sur le LV `/data` de 200 Go). Le
-  FS racine ne doit jamais les héberger : les 64 Go de `/` ne peuvent pas absorber un
-  build, et l'OpenSearch embarqué passe l'index en lecture seule au-delà du seuil de
-  95 % (flood stage ; build du 06/07/2026, mort après 17 h de CPU). Le play refuse de
-  lancer un build avec moins de `photon_build_min_free_gb` libres sur le volume data.
-
-## Dimensionnement
-
-Europe+BR+AR ≈ 40-60 M de documents. Avec 24 Go, l'import **échoue systématiquement
-vers 3,3 M de docs** (heap trop gros → swap → timeout des bulks ; ou sans swap, débit
-qui s'effondre à ~500 docs/s faute de page cache pour les merges). Le README officiel
-de Photon recommande **64 Go** sur le nœud qui importe. Les followers n'importent
-rien : servir l'index ne demande que `photon_server_heap` + du page cache.
-
-## Cas particuliers
-
-- **VM leader sans internet** : pré-stager le jar et les 3 `*.jsonl.zst` dans
-  `{{ photon_data_dir }}/dumps/` avant le play (les tâches `get_url` deviennent
-  idempotentes).
-- **Téléchargement interrompu** : supprimer le fichier partiel et relancer ; le
-  contrôle `zstd -t` du script protège l'import d'un dump tronqué.
-- **rsync interrompu** : relancer le play ; `--partial` reprend où il en était.
-- **L'import n'est pas reprenable** : toute reconstruction repart de zéro.
-- **Index construit avant l'introduction du marqueur** : le play pose un `.build-id`
-  sur l'index du leader au premier passage, puis distribue normalement.
 
 ## Méthode d'import
 

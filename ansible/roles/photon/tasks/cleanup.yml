@@ -1,5 +1,6 @@
 ---
-# Nettoie le leftovers de l'ancienne installation de Photon
+# Nettoie le leftovers de l'ancienne installation de Photon / cas spécial car on avait fait un déploiement 
+# avec une stratégie de cartes différente
 
 - name: Detect legacy leftovers
   become: true
